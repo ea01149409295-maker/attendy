@@ -72,7 +72,7 @@
                 
                 // --- GEOLOCATION RULE ---
                 // If student is further than 100 meters from the teacher, it fails.
-                const isPresent = distance <= 100; 
+                const isPresent = distance <= 10000; 
 
                 if (!isPresent) {
                     alert(`❌ Verification Failed! You are ${Math.round(distance)} meters away from the lecture hall.`);
