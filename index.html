@@ -3,138 +3,93 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Student Attendance Scanner</title>
-    <!-- Library for QR Scanning -->
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <title>Offline Attendance</title>
+    <!-- We still keep this for when they ARE online, but we add a check -->
+    <script src="https://unpkg.com/html5-qrcode" onload="console.log('Scanner Loaded')" onerror="alert('Offline Mode: Camera might need a previous load')"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; padding: 20px; text-align: center; color: #333; }
-        .container { background: white; max-width: 450px; margin: auto; padding: 25px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        h2 { color: #1a73e8; margin-bottom: 20px; }
-        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; box-sizing: border-box; }
-        #reader { width: 100%; border-radius: 10px; margin-top: 15px; overflow: hidden; background: #000; }
-        .btn-sync { background: #34a853; color: white; border: none; padding: 15px; width: 95%; border-radius: 8px; font-size: 16px; cursor: pointer; margin-top: 25px; font-weight: bold; }
-        .btn-sync:hover { background: #2d8e47; }
-        #status-box { margin-top: 20px; padding: 10px; border-radius: 8px; font-weight: bold; font-size: 14px; }
-        .offline-tag { color: #e67e22; background: #fff3e0; border: 1px solid #e67e22; }
-        .online-tag { color: #27ae60; background: #e8f5e9; border: 1px solid #27ae60; }
+        body { font-family: sans-serif; background: #f0f2f5; padding: 20px; text-align: center; }
+        .container { background: white; max-width: 400px; margin: auto; padding: 20px; border-radius: 15px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        input { width: 90%; padding: 12px; margin: 10px 0; border: 1px solid #ccc; border-radius: 8px; }
+        #reader { width: 100%; background: #000; border-radius: 10px; }
+        .btn-sync { background: #28a745; color: white; border: none; padding: 15px; width: 100%; border-radius: 8px; font-weight: bold; margin-top: 20px; cursor: pointer; }
+        #status { margin-top: 15px; font-weight: bold; color: #555; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h2>Attendance Scan</h2>
-    
-    <input type="text" id="studentName" placeholder="Your Full Name">
-    <input type="text" id="studentID" placeholder="Your Student ID">
+    <input type="text" id="studentName" placeholder="Full Name">
+    <input type="text" id="studentID" placeholder="Student ID">
     
     <div id="reader"></div>
     
-    <div id="status-box" class="offline-tag">Status: Ready to Scan (Offline Mode)</div>
-    
-    <button class="btn-sync" onclick="syncData()">Upload/Sync Attendance</button>
-    <p style="font-size: 12px; color: #777; margin-top: 10px;">Connect to internet before clicking Sync.</p>
+    <div id="status">Status: Ready</div>
+    <button class="btn-sync" onclick="syncData()">UPLOAD TO SHEET</button>
 </div>
 
 <script>
-    // Your Specific Google Apps Script URL
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyPxCZxR1s0JHzIQHk0HgUoc5TMTKSHCqbJsFM1b2lY4BSj-yZEOih5FAbpsD63v8RW/exec";
 
-    // Distance Calculation Logic (Haversine Formula)
-    function calculateDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371e3; // Earth's radius in meters
+    // 1. Haversine Distance
+    function getDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371e3;
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c; // Distance in meters
+        const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+        return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
     }
 
-    const html5QrcodeScanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-
-    html5QrcodeScanner.render((decodedText) => {
-        const name = document.getElementById('studentName').value;
-        const id = document.getElementById('studentID').value;
-
-        if (!name || !id) {
-            alert("⚠️ Please enter your Name and ID before scanning!");
+    // 2. Start Scanner (Wait for library)
+    function startScanner() {
+        if (typeof Html5QrcodeScanner === "undefined") {
+            document.getElementById('status').innerText = "Error: Scanner Library not loaded. Connect to internet ONCE then try again.";
             return;
         }
+        
+        const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
+        scanner.render((text) => {
+            const name = document.getElementById('studentName').value;
+            const id = document.getElementById('studentID').value;
+            if(!name || !id) return alert("Enter Name and ID first!");
 
-        try {
-            const lecData = JSON.parse(decodedText); // Extract Teacher's QR Data
+            document.getElementById('status').innerText = "Verifying GPS...";
             
-            document.getElementById('status-box').innerText = "Checking Location...";
-
             navigator.geolocation.getCurrentPosition((pos) => {
-                const distance = calculateDistance(pos.coords.latitude, pos.coords.longitude, lecData.lat, lecData.lng);
-                
-                // --- GEOLOCATION RULE ---
-                // If student is further than 100 meters from the teacher, it fails.
-                const isPresent = distance <= 10000; 
+                const data = JSON.parse(text);
+                const dist = getDistance(pos.coords.latitude, pos.coords.longitude, data.lat, data.lng);
 
-                if (!isPresent) {
-                    alert(`❌ Verification Failed! You are ${Math.round(distance)} meters away from the lecture hall.`);
-                    document.getElementById('status-box').innerText = "Status: Location Error";
-                    return;
+                // WE SET DISTANCE TO 10,000 FOR YOUR TEST - CHANGE TO 200 FOR REAL CLASS
+                if (dist > 10000) { 
+                    alert("Too far from class!");
+                } else {
+                    const logs = JSON.parse(localStorage.getItem('attendance_logs') || "[]");
+                    logs.push({ name, id, subName: data.sn, subCode: data.sc, date: data.dt, verified: "Yes" });
+                    localStorage.setItem('attendance_logs', JSON.stringify(logs));
+                    alert("✅ Saved Locally!");
+                    document.getElementById('status').innerText = "Saved! Sync when you have Wi-Fi.";
                 }
-
-                const newRecord = {
-                    name: name,
-                    id: id,
-                    subName: lecData.sn,
-                    subCode: lecData.sc,
-                    date: lecData.dt,
-                    verified: "Verified (GPS)"
-                };
-
-                // Save into local memory (Works 100% offline)
-                let records = JSON.parse(localStorage.getItem('attendance_logs') || "[]");
-                records.push(newRecord);
-                localStorage.setItem('attendance_logs', JSON.stringify(records));
-
-                alert(`✅ Attendance Saved! \nSubject: ${lecData.sn} \nClick 'Sync' when you have internet.`);
-                document.getElementById('status-box').innerText = "Status: 1 Record Saved Locally";
-                document.getElementById('status-box').className = "online-tag";
-
-            }, (err) => {
-                alert("❌ Error: GPS must be ON to verify your presence.");
-                document.getElementById('status-box').innerText = "Status: GPS Required";
             });
+        });
+    }
 
-        } catch (e) {
-            alert("❌ Invalid QR Code. Please scan the teacher's official code.");
-        }
-    });
+    // Auto-start scanner
+    setTimeout(startScanner, 1000);
 
     async function syncData() {
         const logs = JSON.parse(localStorage.getItem('attendance_logs') || "[]");
+        if (logs.length === 0) return alert("Nothing to sync.");
         
-        if (logs.length === 0) {
-            alert("No unsynced attendance found.");
-            return;
-        }
-
-        document.getElementById('status-box').innerText = "Syncing with Server...";
-
+        document.getElementById('status').innerText = "Syncing...";
         try {
-            await fetch(SCRIPT_URL, {
-                method: 'POST',
-                mode: 'no-cors',
-                body: JSON.stringify(logs)
-            });
-            
-            alert("🚀 Sync Successful! Your attendance is now on the Google Sheet.");
-            localStorage.removeItem('attendance_logs'); // Clear memory after sync
-            document.getElementById('status-box').innerText = "Status: All Data Synced";
-            document.getElementById('status-box').className = "online-tag";
-        } catch (error) {
-            alert("❌ Sync Failed! Please check your internet connection and try again.");
-            document.getElementById('status-box').innerText = "Status: Sync Failed (No Internet)";
+            await fetch(SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(logs) });
+            localStorage.removeItem('attendance_logs');
+            alert("🚀 Uploaded to Google Sheet!");
+            document.getElementById('status').innerText = "Sync Complete";
+        } catch (e) {
+            alert("Sync failed. No internet.");
         }
     }
 </script>
-
 </body>
 </html>
